@@ -1,10 +1,24 @@
 /* Procreate Document Class
- * Version 1.0.1 - 14th April 2016
+ * Version 1.0.1 - 3rd June 2016
  * -----
  * Procreate belongs to Savage Interactive (http://procreate.si/)
- * Dependencies: Blob.js, JSZip
+ * -----
+ * Uses the following libraries:
+ *  BPList Parser: https://github.com/joeferner/node-bplist-parser
+ *  Browserify: http://browserify.org/
+ *  JSZip: https://stuk.github.io/jszip/
+ *  Node Buffer: https://www.npmjs.com/package/buffer
  */
-var ProcreateDocument = function()
+
+var // Load JSZip
+	JSZip = window.JSZip || require('./JSZip/JSZip.min.js'),
+	// Load the bplist-parser library
+	BPList = window.BPList || require('bplist-parser'),
+	// Load the Uint8ArrayConverter library
+	Uint8ArrayConverter = window.Uint8ArrayConverter || require('../../../../../sketch-viewer/SketchDocument/src/Uint8ArrayConverter.js');
+
+// The ProcreateDocument class
+window.ProcreateDocument = function()
 {
 	// Create a global for the class
 	var $this = this,
@@ -16,7 +30,71 @@ var ProcreateDocument = function()
 	$loaded = 0,
 
 	// Keep score of how many video elements have loaded
-	$videosready = 0;
+	$videosready = 0,
+
+	/** Manageable layer object */
+	Layer = function()
+	{
+		// Create a global for this class
+		var $layer = this,
+
+		// Set the total and loaded chunk counts to zero
+		$totalchunks = 0,
+		$loadedchunks = 0;
+
+		/** Attempts to read the layer's chunks */
+		$layer.load = function()
+		{
+			// If the layer contains data chunks
+			if($layer.chunks)
+			{
+				// Iterate through the chunks
+				for(var i in $layer.chunks)
+				{
+					// Get the current chunk
+					var chunk = $layer.chunks[i];
+
+					// If this is, in fact, a chunk
+					if(chunk.name.match(/\/(.*?)\.chunk$/i))
+					{
+						// Increment the total chunks
+						$totalchunks ++;
+
+						// Load the chunk as base64 data
+						chunk.async('base64').then(function(a)
+						{
+							// Iterate through the chunks
+							for(var j in $layer.chunks)
+							{
+								// If we are iterating past the current chunk
+								if($layer.chunks[j].name == chunk.name)
+								{
+									// Save the chunk's base64 data
+									$layer.chunks[j].base64 = a;
+
+									// Break the iteration
+									break;
+								}
+							}
+
+							// Increment the loaded chunks count
+							$loadedchunks ++;
+
+							// If all the chunks have loaded
+							if($loadedchunks == $totalchunks)
+							{
+								// Trigger a chunksload event
+								$this.trigger('chunksload', $layer);
+							}
+						});
+					}
+				}
+			}
+
+			// Return a failure
+			return false;
+		};
+	};
 
 	// If none of the dependencies are ready
 	if(!Blob || !File || !FileReader || !JSZip)
@@ -28,7 +106,7 @@ var ProcreateDocument = function()
 		if(!Blob)
 		{
 			// Add it to the list of missing dependencies
-			missing.push('Blob.js (https://github.com/eligrey/Blob.js/)');
+			missing.push('Blob');
 		}
 
 		// If File is missing
@@ -179,6 +257,9 @@ var ProcreateDocument = function()
 	// Create a list of video elements
 	$this.videos = [];
 
+	// Create a list of layers
+	$this.layers = [];
+
 	// Loads a file into the document
 	$this.load = function(file)
 	{
@@ -194,12 +275,6 @@ var ProcreateDocument = function()
 
 		// Mark the document as loaded
 		$loaded = 1;
-
-		// Update the filename
-		$this.filename = file.name;
-
-		// Trigger a filenamechange event
-		$this.trigger('filenamechange', $this.filename);
 
 		// Create a new file reader
 		var reader = new FileReader();
@@ -218,6 +293,55 @@ var ProcreateDocument = function()
 
 				// Create an empty list for video clips
 				videos = [];
+
+				// Try to load the document binary property list (bplist) file
+				files['Document.archive'].async('uint8array').then(function(a)
+				{
+					// Assemble the document
+					$this.$data = Uint8ArrayConverter.toPlist(a);
+
+					// Update the filename
+					$this.filename = ($this.$data.name == '$null') ? file.name.replace(/\.procreate$/i, '') : $this.$data.name;
+
+					// Trigger a filenamechange event
+					$this.trigger('filenamechange', $this.filename);
+
+					// Iterate through the document's layers
+					for(var i in $this.$data.layers['NS.objects'])
+					{
+						var // Get the current layer
+							layer = $this.$data.layers['NS.objects'][i],
+							// Create a new layer object
+							newlayer = new Layer();
+
+						// Iterate through the layer's data
+						for(var j in layer)
+						{
+							// Nobody needs a circular reference
+							if(j != 'document')
+							{
+								// Copy the data to the new layer object
+								newlayer[j] = layer[j];
+							}
+						}
+
+						// Retrieve the new layer's chunks
+						newlayer.chunks = zip.file(new RegExp('^' + newlayer.UUID + '\\/(.*?)\\.chunk$', 'i'));
+
+						// Add the layer to the list and save its index
+						newlayer.index = $this.layers.push(newlayer) - 1;
+
+						// Load the new layer's chunks
+						newlayer.load();
+					}
+
+					// Trigger a dataload event
+					$this.trigger('dataload', $this.$data);
+				}, function(e)
+				{
+					// Log any errors
+					console.error(e);
+				});
 
 				// Get the thumbnail file and read it as base64 data
 				files['QuickLook/Thumbnail.png'].async('base64').then(function(a)
@@ -283,8 +407,8 @@ var ProcreateDocument = function()
 								// Show the next clip
 								next.className = 'active';
 
-								// Play the next clip
-								next.play();
+								// Try to play the next clip
+								try { next.play(); } catch(e){}
 
 								// Hide this clip
 								this.className = '';
@@ -326,7 +450,15 @@ var ProcreateDocument = function()
 							preload(videos[i], video);
 						}
 					}
+				}, function(e)
+				{
+					// Log any errors
+					console.error(e);
 				});
+			}, function(e)
+			{
+				// Log any errors
+				console.error(e);
 			});
 		};
 
