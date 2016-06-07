@@ -7,15 +7,19 @@
  *  BPList Parser: https://github.com/joeferner/node-bplist-parser
  *  Browserify: http://browserify.org/
  *  JSZip: https://stuk.github.io/jszip/
+ *  MiniLZO: https://github.com/abraidwood/minilzo-js
  *  Node Buffer: https://www.npmjs.com/package/buffer
  */
 
 var // Load JSZip
-	JSZip = window.JSZip || require('./JSZip/JSZip.min.js'),
+	JSZip = window.JSZip || (window.JSZip = require('./JSZip/JSZip.min.js')),
 	// Load the bplist-parser library
-	BPList = window.BPList || require('bplist-parser'),
+	BPList = window.BPList || (window.BPList = require('bplist-parser')),
 	// Load the Uint8ArrayConverter library
-	Uint8ArrayConverter = window.Uint8ArrayConverter || require('../../../../../sketch-viewer/SketchDocument/src/Uint8ArrayConverter.js');
+	Uint8ArrayConverter = window.Uint8ArrayConverter || (window.Uint8ArrayConverter = require('../../../../../sketch-viewer/SketchDocument/src/Uint8ArrayConverter.js'));
+
+// Load minilzo-js
+require('./lzo1x.js');
 
 // The ProcreateDocument class
 window.ProcreateDocument = function()
@@ -48,6 +52,33 @@ window.ProcreateDocument = function()
 			// If the layer contains data chunks
 			if($layer.chunks)
 			{
+				// Create an image for the layer
+				$layer.image = new Image();
+
+				var // Create a canvas for the layer
+					$lcanvas = document.createElement('canvas'),
+					// Get the layer's canvas context
+					$lcontext = $layer.canvas.getContext('2d');
+
+				// When the layer image loads
+				$layer.image.onload = function()
+				{
+					console.log(this);
+					// Increment the loaded chunks count
+					$loadedchunks ++;
+
+					// If all the chunks have loaded
+					if($loadedchunks == $totalchunks)
+					{
+						// Trigger a layerload event
+						$this.trigger('layerload', $layer);
+					}
+				};
+
+				// Set the layer canvas size
+				$lcanvas.width = $this.$data.size[0];
+				$lcanvas.height = $this.$data.size[1];
+
 				// Iterate through the chunks
 				for(var i in $layer.chunks)
 				{
@@ -60,31 +91,94 @@ window.ProcreateDocument = function()
 						// Increment the total chunks
 						$totalchunks ++;
 
-						// Load the chunk as base64 data
-						chunk.async('base64').then(function(a)
+						// Load the chunk as a uint8 array
+						chunk.async('uint8array').then(function(a)
 						{
+							// Create an lzo state
+							var state =
+							{
+								inputBuffer: a,
+								outputBuffer: null
+							},
+
+							// Begin with the first chunk
+							chx = 0, chy = 0;
+
 							// Iterate through the chunks
 							for(var j in $layer.chunks)
 							{
+								// Increment chunk x
+								chx ++;
+
+								// If we have hit the last chunk on the x axis
+								if((chx * $this.$data.tileSize) > $this.$data.size[0])
+								{
+									// Reset chunk x
+									chx = 0;
+
+									// Increment chunk y
+									chy ++;
+								}
+
 								// If we are iterating past the current chunk
 								if($layer.chunks[j].name == chunk.name)
 								{
-									// Save the chunk's base64 data
-									$layer.chunks[j].base64 = a;
+									// Decompress the chunk data
+									lzo1x.decompress(state);
+
+									var // Create a new canvas
+										cvs = document.createElement('canvas'),
+										// Get its context
+										ctx = cvs.getContext('2d'),
+										// Create a pixel
+										pixel = ctx.createImageData(1, 1),
+										// Get the pixel data object
+										pdat = pixel.data,
+										// Start x and y coordinates
+										x = 0, y = 0;
+
+									// Set the canvas width and height to the document's tile size
+									cvs.width = $this.$data.tileSize;
+									cvs.height = $this.$data.tileSize;
+
+									// Write pixels to the canvas (sadly, this is how it has to be)
+									for(var i = 0; i < state.outputBuffer.length; i += 4)
+									{
+										// Increment x
+										x ++;
+										
+										// If we have hit the edge
+										if(x > $this.$data.tileSize)
+										{
+											// Reset x
+											x = 0;
+
+											// Increment y
+											y ++;
+										}
+
+										// Set up the pixel data
+										pdat[0] = state.outputBuffer[i];
+										pdat[1] = state.outputBuffer[i + 1];
+										pdat[2] = state.outputBuffer[i + 2];
+										pdat[3] = state.outputBuffer[i + 3];
+
+										// Draw the pixel to the canvas
+										ctx.putImageData(pixel, x, y);
+									}
+
+									// Save the canvas to the chunk
+									$layer.chunks[j].canvas = cvs;
+
+									// Draw the chunk to the layer
+									$lcontext.drawImage(cvs, chx * $this.$data.tileSize, chy * $this.$data.tileSize);
+
+									// Load the canvas data into the layer image
+									$layer.image.src = $lcanvas.toDataURL('image/png');
 
 									// Break the iteration
 									break;
 								}
-							}
-
-							// Increment the loaded chunks count
-							$loadedchunks ++;
-
-							// If all the chunks have loaded
-							if($loadedchunks == $totalchunks)
-							{
-								// Trigger a chunksload event
-								$this.trigger('chunksload', $layer);
 							}
 						});
 					}
@@ -300,6 +394,11 @@ window.ProcreateDocument = function()
 					// Assemble the document
 					$this.$data = Uint8ArrayConverter.toPlist(a);
 
+					// Correctly format the document's size
+					$this.$data.size = $this.$data.size.replace(/^{([0-9]+), ([0-9]+)}$/, '$1,$2').split(',');
+					$this.$data.size[0] = parseFloat($this.$data.size[0]);
+					$this.$data.size[1] = parseFloat($this.$data.size[1]);
+
 					// Update the filename
 					$this.filename = ($this.$data.name == '$null') ? file.name.replace(/\.procreate$/i, '') : $this.$data.name;
 
@@ -381,8 +480,8 @@ window.ProcreateDocument = function()
 							// Populate the source element with the video data
 							source.src = 'data:video/mp4;base64,' + a;
 
-							// Trigger an videoload event
-							$this.trigger('videoload', video);
+							// Trigger an frameload event
+							$this.trigger('frameload', video);
 
 							// If all the videos have loaded
 							if($videosready == $this.videos.length)
