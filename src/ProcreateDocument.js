@@ -12,14 +12,14 @@
  */
 
 var // Load JSZip
-	JSZip = window.JSZip || (window.JSZip = require('./JSZip/JSZip.min.js')),
+	JSZip = window.JSZip || (window.JSZip = require('../lib/jszip.min.js')),
 	// Load the bplist-parser library
 	BPList = window.BPList || (window.BPList = require('bplist-parser')),
 	// Load the Uint8ArrayConverter library
-	Uint8ArrayConverter = window.Uint8ArrayConverter || (window.Uint8ArrayConverter = require('../../../../../sketch-viewer/SketchDocument/src/Uint8ArrayConverter.js'));
+	Uint8ArrayConverter = window.Uint8ArrayConverter || (window.Uint8ArrayConverter = require('../lib/Uint8ArrayConverter.js'));
 
 // Load minilzo-js
-require('./lzo1x.js');
+require('../lib/lzo1x.js');
 
 // The ProcreateDocument class
 window.ProcreateDocument = function()
@@ -43,7 +43,7 @@ window.ProcreateDocument = function()
 		var $layer = this,
 
 		// Set the total and loaded chunk counts to zero
-		$totalchunks = 0,
+		$totalchunks  = 0,
 		$loadedchunks = 0;
 
 		/** Attempts to read the layer's chunks */
@@ -58,12 +58,17 @@ window.ProcreateDocument = function()
 				var // Create a canvas for the layer
 					$lcanvas = document.createElement('canvas'),
 					// Get the layer's canvas context
-					$lcontext = $layer.canvas.getContext('2d');
+					$lcontext = $lcanvas.getContext('2d');
+
+				// If an error occurs, log an error to the console
+				$layer.image.onerror = function()
+				{
+					console.error('A chunk failed to load :(');
+				};
 
 				// When the layer image loads
 				$layer.image.onload = function()
 				{
-					console.log(this);
 					// Increment the loaded chunks count
 					$loadedchunks ++;
 
@@ -336,7 +341,7 @@ window.ProcreateDocument = function()
 	};
 
 	// The name of this file
-	$this.filename = 'Untitled.procreate';
+	$this.filename = 'Untitled_Document.procreate';
 
 	// Create an image file for the thumbnail
 	$this.thumbnail = document.createElement('img');

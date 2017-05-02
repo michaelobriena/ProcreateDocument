@@ -1,0 +1,72 @@
+body {
+  background: #333;
+  font-family: Arial, sans-serif;
+  font-size: 10px;
+  text-align: center;
+  color: #FFF;
+}
+
+.viewer {
+  display: inline-block;
+  margin: 5em 0;
+  min-width: 64em;
+  background: #444;
+  border-radius: 1em;
+  box-shadow: 0 0.25em 5em rgba(0, 0, 0, 0.125);
+}
+.viewer .empty, .viewer .loading {
+  display: none;
+}
+.viewer .filename {
+  padding: 1.5em 1.5em 0;
+  font-size: 1.6em;
+  color: #999;
+}
+.viewer .thumbnail {
+  display: none;
+  padding: 1.5em;
+}
+.viewer .thumbnail.active {
+  display: block;
+}
+.viewer .thumbnail img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+.viewer .videos {
+  display: none;
+  padding: 1.5em;
+}
+.viewer .videos.active {
+  display: block;
+}
+.viewer .videos video {
+  display: none;
+  margin: 0 auto;
+}
+.viewer .videos video.active {
+  display: block;
+}
+.viewer.empty {
+  border: .2em dashed #333;
+}
+.viewer.empty .empty {
+  display: block;
+  padding: 1.5em;
+  font-size: 2.5em;
+  color: #888;
+}
+.viewer.empty .loading, .viewer.empty .filename, .viewer.empty .videos {
+  display: none;
+}
+.viewer.loading .loading {
+  display: block;
+  padding: 1.5em;
+  font-size: 2.5em;
+  font-style: italic;
+  color: #FFF;
+}
+.viewer.loading .empty, .viewer.loading .filename, .viewer.loading .videos {
+  display: none;
+}
